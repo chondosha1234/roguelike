@@ -167,6 +167,14 @@ impl Object {
                 fighter.hp -= damage;
             }
         }
+
+        // check for death, call death function
+        if let Some(fighter) = self.fighter {
+            if fighter.hp <= 0 {
+                self.alive = false;
+                fighter.on_death.callback(self);
+            }
+        }
     }
 
     pub fn attack(&mut self, target: &mut Object) {
@@ -193,6 +201,27 @@ struct Fighter {
     hp: i32,
     defense: i32,
     power: i32,
+    on_death: DeathCallback,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum DeathCallback {
+    Player,
+    Monster,
+}
+
+impl DeathCallback {
+    // self is enum DeathCallback, object is the object dying 
+    fn callback(self, object: &mut Object) {
+        use DeathCallback::*;
+        // callback is function of this type and it matches to the enum type
+        let callback: fn(&mut Object) = match self {
+            Player => player_death,
+            Monster => monster_death,
+        };
+        // call the appropriate function
+        callback(object);
+    }
 }
 
 // monster artificial intelligence
@@ -311,6 +340,7 @@ fn place_objects(room: Rect, map: &Map, objects: &mut Vec<Object>) {
                 hp: 10,
                 defense: 0,
                 power: 3,
+                on_death: DeathCallback::Monster,
             });
             orc.ai = Some(Ai::Basic);
             orc
@@ -322,6 +352,7 @@ fn place_objects(room: Rect, map: &Map, objects: &mut Vec<Object>) {
                 hp: 16,
                 defense: 1,
                 power: 4,
+                on_death: DeathCallback::Monster,
             });
             troll.ai = Some(Ai::Basic);
             troll
@@ -378,7 +409,7 @@ fn player_move_or_attack(dx: i32, dy: i32, game: &Game, objects: &mut [Object]) 
     let y = objects[PLAYER].y + dy;
 
     // try to find attackable object
-    let target_id = objects.iter().position(|object| object.pos() == (x, y));
+    let target_id = objects.iter().position(|object| object.fighter.is_some() && object.pos() == (x, y));
 
     // attack if target found, move otherwise
     match target_id {
@@ -392,7 +423,7 @@ fn player_move_or_attack(dx: i32, dy: i32, game: &Game, objects: &mut [Object]) 
     }
 }
 
-
+// monster ai function to move and attack 
 fn ai_take_turn(monster_id: usize, tcod: &Tcod, game: &Game, objects: &mut [Object]) {
     // a basic monster takes its turn. If you can see it, it can see you
     let (monster_x, monster_y) = objects[monster_id].pos();
@@ -402,7 +433,8 @@ fn ai_take_turn(monster_id: usize, tcod: &Tcod, game: &Game, objects: &mut [Obje
             // move towards player if far 
             let (player_x, player_y) = objects[PLAYER].pos();
             move_towards(monster_id, player_x, player_y, &game.map, objects);
-        } else if objects[PLAYER].fighter.map_or(false, |f| f.hp > 0) {
+
+        } else if objects[PLAYER].fighter.map_or(false, |f| f.hp > 0) {  // checks if it is fighter
             // close enough to attack (if player is alive)
             let (monster, player) = mut_two(monster_id, PLAYER, objects);
             monster.attack(player); 
@@ -410,16 +442,47 @@ fn ai_take_turn(monster_id: usize, tcod: &Tcod, game: &Game, objects: &mut [Obje
     }
 }
 
+// function to split vector into 2 parts so you can borrow from 2 elements at the same time
 fn mut_two<T>(first_index: usize, second_index: usize, items: &mut [T]) -> (&mut T, &mut T) {
+    // make sure the indices aren't the same
     assert!(first_index != second_index);
+    // get the index to split at
     let split_at_index = cmp::max(first_index, second_index);
+    // get 2 slices of the vector
     let (first_slice, second_slice) = items.split_at_mut(split_at_index);
+    // if first is less, use that index, and use 0 index of second slice 
     if first_index < second_index {
         (&mut first_slice[first_index], &mut second_slice[0])
     } else {
         (&mut second_slice[0], &mut first_slice[second_index])
     }
 }
+
+/*
+ *  Death callback functions 
+ */
+
+fn player_death(player: &mut Object) {
+    // game ended 
+    println!("You died!");
+
+    // transform player to corpse
+    player.char = '%';
+    player.color = DARK_RED;
+}
+
+fn monster_death(monster: &mut Object) {
+    // transform it into corpse, it also doesn't block anymore
+    // can't be attacked or move 
+    println!("{} is dead!", monster.name);
+    monster.char = '%';
+    monster.color = DARK_RED;
+    monster.blocks = false;
+    monster.fighter = None;   // disables the attack functionality
+    monster.ai = None;
+    monster.name = format!("remains of {}", monster.name);
+}
+
 
 
 /****************************************************************************************/
@@ -465,8 +528,16 @@ fn render_all(tcod: &mut Tcod, game: &mut Game, objects: &[Object], fov_recomput
         }
     }
     
+    // clone the objects into this mutable vector and filter out objects not in fov
+    let mut to_draw: Vec<_> = objects
+        .iter()
+        .filter(|o| tcod.fov.is_in_fov(o.x, o.y))
+        .collect();
+    // sort so non blocking objects are first 
+    to_draw.sort_by(|o1, o2| {o1.blocks.cmp(&o2.blocks) });
+
     // draw all objects in list 
-    for object in objects {
+    for object in &to_draw {
         if tcod.fov.is_in_fov(object.x, object.y) {
             object.draw(&mut tcod.con);
         }
@@ -576,6 +647,7 @@ fn main() {
         hp: 30,
         defense: 2,
         power: 5,
+        on_death: DeathCallback::Player,
     });
 
     let mut objects = vec![player];
