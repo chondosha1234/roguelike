@@ -14,6 +14,8 @@ const MAX_ROOMS: i32 = 30;
 const FOV_ALGO: FovAlgorithm = FovAlgorithm::Basic;   //default algorithm 
 const FOV_LIGHT_WALLS: bool = true;  // light walls or not
 const TORCH_RADIUS: i32 = 10;
+const MAX_ROOM_MONSTERS: i32 = 3;
+const PLAYER: usize = 0; // player will always be first object in list 
 
 const COLOR_DARK_WALL: Color = Color { r:0, g: 0, b: 100 };
 const COLOR_LIGHT_WALL: Color = Color { r: 130, g: 110, b: 50 };
@@ -112,6 +114,15 @@ impl Object {
         Object { x, y, char, color }
     }
 
+    pub fn pos(&self) -> (i32, i32) {
+        (self.x, self.y)
+    }
+
+    pub fn set_pos(&mut self, x: i32, y: i32) {
+        self.x = x;
+        self.y = y;
+    }
+
     // move by a given amount
     pub fn move_by(&mut self, dx: i32, dy: i32, game: &Game) {
         if !game.map[(self.x + dx) as usize][(self.y + dy) as usize].blocked {
@@ -131,7 +142,7 @@ impl Object {
 
 
 // function to create map with vec! macro 
-fn make_map(player: &mut Object) -> Map {
+fn make_map(objects: &mut Vec<Object>) -> Map {
     // fill map with wall tiles
     let mut map = vec![vec![Tile::wall(); MAP_HEIGHT as usize]; MAP_WIDTH as usize];
     
@@ -155,15 +166,16 @@ fn make_map(player: &mut Object) -> Map {
         if !failed {
             // add room by drawing the map tiles 
             create_room(new_room, &mut map);
+
+            // place objects in room
+            place_objects(new_room, objects);
             
             // get center coordinates of room
             let (new_x, new_y) = new_room.center();
 
             // put player in room if its first room
             if rooms.is_empty() {
-                player.x = new_x;
-                player.y = new_y;
-
+                objects[PLAYER].set_pos(new_x, new_y);
             } else {
                 // else need to connect this room to previous room 
                 // get previous room center 
@@ -215,12 +227,35 @@ fn create_v_tunnel(y1: i32, y2: i32, x: i32, map: &mut Map) {
     }
 }
 
+// function to place objects in a room
+fn place_objects(room: Rect, objects: &mut Vec<Object>) {
+    // get random number of monsters
+    let num_monsters = rand::thread_rng().gen_range(0, MAX_ROOM_MONSTERS + 1);
+
+    for _ in 0..num_monsters {
+        // get random spot for monster
+        let x = rand::thread_rng().gen_range(room.x1 + 1, room.x2);
+        let y = rand::thread_rng().gen_range(room.y1 + 1, room.y2);
+        
+        // 80% chance for orc
+        let mut monster = if rand::random::<f32>() < 0.8 {
+            // create orc
+            Object::new(x, y, 'o', DESATURATED_GREEN)
+        } else {
+            // create troll 
+            Object::new(x, y, 'T', DARKER_GREEN)
+        };
+
+        objects.push(monster);
+    }
+}
+
 // function to draw all objects and map 
 fn render_all(tcod: &mut Tcod, game: &mut Game, objects: &[Object], fov_recompute: bool) {
     
     // recompute fov if needed
     if fov_recompute {
-        let player = &objects[0];
+        let player = &objects[PLAYER];
         tcod.fov.compute_fov(player.x, player.y, TORCH_RADIUS, FOV_LIGHT_WALLS, FOV_ALGO);
     }
 
@@ -325,11 +360,11 @@ fn main() {
     
     // create player object and object list 
     let player = Object::new(0, 0, '@', WHITE);
-    let mut objects = [player];
+    let mut objects = vec![player];
     
     let mut game = Game {
         // generate map 
-        map: make_map(&mut objects[0]),
+        map: make_map(&mut objects),
     };
     
     // populate FOV map according to generated map 
@@ -353,12 +388,12 @@ fn main() {
         tcod.con.clear();
         
         // recompute if player has moved
-        let fov_recompute = previous_player_position != (objects[0].x, objects[0].y);
+        let fov_recompute = previous_player_position != (objects[PLAYER].x, objects[PLAYER].y);
         render_all(&mut tcod, &mut game, &objects, fov_recompute);
 
         tcod.root.flush();
         
-        let player = &mut objects[0];
+        let player = &mut objects[PLAYER];
         let exit = handle_keys(&mut tcod, &game, player);
         if exit {
             break;
