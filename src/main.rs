@@ -108,6 +108,7 @@ struct Game {
     map: Map,
 }
 
+
 // generic object: player, monster, item, stairs
 #[derive(Debug)]
 struct Object {
@@ -118,6 +119,8 @@ struct Object {
     name: String,
     blocks: bool,
     alive: bool,
+    fighter: Option<Fighter>,  // can be some or none 
+    ai: Option<Ai>,                         
 }
 
 impl Object {
@@ -130,6 +133,8 @@ impl Object {
             name: name.into(),
             blocks: blocks,
             alive: false,
+            fighter: None,
+            ai: None,
         }
     }
 
@@ -142,15 +147,12 @@ impl Object {
         self.y = y;
     }
     
-    /*
-    // move by a given amount
-    pub fn move_by(&mut self, dx: i32, dy: i32, game: &Game) {
-        if !game.map[(self.x + dx) as usize][(self.y + dy) as usize].blocked {
-            self.x += dx;
-            self.y += dy;
-        }
+    // return distance to another object
+    pub fn distance_to(&self, other: &Object) -> f32 {
+        let dx = other.x - self.x;
+        let dy = other.y - self.y;
+        ((dx.pow(2) + dy.pow(2)) as f32).sqrt()
     }
-    */
 
     // set color and then draw character for object 
     pub fn draw(&self, con: &mut dyn Console) {       // Console is a trait -- dyn highlights this
@@ -159,7 +161,28 @@ impl Object {
     }
 }
 
+/*
+ *  Components for objects
+ */
 
+// combat related properties and methods (player, npc, enemy)
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Fighter {
+    max_hp: i32,
+    hp: i32,
+    defense: i32,
+    power: i32,
+}
+
+// monster artificial intelligence
+#[derive(Clone, Debug, PartialEq)]
+enum Ai {
+    Basic,
+}
+
+
+
+/***********************************************************************************/
 
 
 // function to create map with vec! macro 
@@ -261,10 +284,26 @@ fn place_objects(room: Rect, map: &Map, objects: &mut Vec<Object>) {
         // 80% chance for orc
         let mut monster = if rand::random::<f32>() < 0.8 {
             // create orc
-            Object::new(x, y, 'o', "orc", DESATURATED_GREEN, true)
+            let mut orc = Object::new(x, y, 'o', "orc", DESATURATED_GREEN, true);
+            orc.fighter = Some(Fighter {
+                max_hp: 10,
+                hp: 10,
+                defense: 0,
+                power: 3,
+            });
+            orc.ai = Some(Ai::Basic);
+            orc
         } else {
             // create troll 
-            Object::new(x, y, 'T', "troll", DARKER_GREEN, true)
+            let mut troll = Object::new(x, y, 'T', "troll", DARKER_GREEN, true);
+            troll.fighter = Some(Fighter {
+                max_hp: 16,
+                hp: 16,
+                defense: 1,
+                power: 4,
+            });
+            troll.ai = Some(Ai::Basic);
+            troll
         };
         
         if !is_blocked(x, y, map, objects) {
@@ -275,6 +314,8 @@ fn place_objects(room: Rect, map: &Map, objects: &mut Vec<Object>) {
 }
 
 
+/*************************************************************************************/
+
 // move object by a given amount
 fn move_by(id: usize, dx: i32, dy: i32, map: &Map, objects: &mut [Object]) {
     let (x, y) = objects[id].pos();
@@ -283,6 +324,20 @@ fn move_by(id: usize, dx: i32, dy: i32, map: &Map, objects: &mut [Object]) {
     }
 }
 
+// function to move to an object (usually monster toward player)
+fn move_towards(id: usize, target_x: i32, target_y: i32, map: &Map, objects: &mut [Object]) {
+    // vector from this object to target, and distance
+    let dx = target_x - objects[id].x;
+    let dy = target_y - objects[id].y;
+    // distance = sqrt (x^2 + y^2)
+    let distance = ((dx.pow(2) + dy.pow(2)) as f32).sqrt();
+
+    // normalize it to length 1 (preserve direction), then round it and
+    // convert to integer so movement is restricted to map grid 
+    let dx = (dx as f32 / distance).round() as i32;
+    let dy = (dy as f32 / distance).round() as i32;
+    move_by(id, dx, dy, map, objects);
+}
 
 // function to check if a tile is blocked by an blocking object
 fn is_blocked(x: i32, y: i32, map: &Map, objects: &[Object]) -> bool {
@@ -294,6 +349,48 @@ fn is_blocked(x: i32, y: i32, map: &Map, objects: &[Object]) -> bool {
     // checks all objects and sees if in same spot and blocking, returns bool
     objects.iter().any(|object| object.blocks && object.pos() == (x, y))
 }
+
+
+fn player_move_or_attack(dx: i32, dy: i32, game: &Game, objects: &mut [Object]) {
+    // coordinates player is moving too
+    let x = objects[PLAYER].x + dx;
+    let y = objects[PLAYER].y + dy;
+
+    // try to find attackable object
+    let target_id = objects.iter().position(|object| object.pos() == (x, y));
+
+    // attack if target found, move otherwise
+    match target_id {
+        Some(target_id) => {
+            println!("The {} laughs at your puny efforts!", objects[target_id].name);
+        }
+        None => {
+            move_by(PLAYER, dx, dy, &game.map, objects);
+        }
+    }
+}
+
+
+fn ai_take_turn(monster_id: usize, tcod: &Tcod, game: &Game, objects: &mut [Object]) {
+    // a basic monster takes its turn. If you can see it, it can see you
+    let (monster_x, monster_y) = objects[monster_id].pos();
+
+    if tcod.fov.is_in_fov(monster_x, monster_y) {
+        if objects[monster_id].distance_to(&objects[PLAYER]) >= 2.0 {
+            // move towards player if far 
+            let (player_x, player_y) = objects[PLAYER].pos();
+            move_towards(monster_id, player_x, player_y, &game.map, objects);
+        } else if objects[PLAYER].fighter.map_or(false, |f| f.hp > 0) {
+            // close enough to attack (if player is alive)
+            let monster = &objects[monster_id];
+            println!("The attack of the {} bounces off your shiny metal armor!", monster.name);
+        }
+    }
+}
+
+
+/****************************************************************************************/
+
 
 // function to draw all objects and map 
 fn render_all(tcod: &mut Tcod, game: &mut Game, objects: &[Object], fov_recompute: bool) {
@@ -354,24 +451,6 @@ fn render_all(tcod: &mut Tcod, game: &mut Game, objects: &[Object], fov_recomput
     );  
 }
 
-fn player_move_or_attack(dx: i32, dy: i32, game: &Game, objects: &mut [Object]) {
-    // coordinates player is moving too
-    let x = objects[PLAYER].x + dx;
-    let y = objects[PLAYER].y + dy;
-
-    // try to find attackable object
-    let target_id = objects.iter().position(|object| object.pos() == (x, y));
-
-    // attack if target found, move otherwise
-    match target_id {
-        Some(target_id) => {
-            println!("The {} laughs at your puny efforts!", objects[target_id].name);
-        }
-        None => {
-            move_by(PLAYER, dx, dy, &game.map, objects);
-        }
-    }
-}
 
 // return true means end game, return false means keep going 
 fn handle_keys(tcod: &mut Tcod, game: &Game, objects: &mut Vec<Object>) -> PlayerAction {
@@ -422,6 +501,9 @@ fn handle_keys(tcod: &mut Tcod, game: &Game, objects: &mut Vec<Object>) -> Playe
 }
 
 
+/******************************************************************************************/
+
+
 fn main() {
     
     // root initialization 
@@ -444,6 +526,12 @@ fn main() {
     // create player object and object list 
     let mut player = Object::new(0, 0, '@', "player", WHITE, true);
     player.alive = true;
+    player.fighter = Some(Fighter {
+        max_hp: 30,
+        hp: 30,
+        defense: 2,
+        power: 5,
+    });
 
     let mut objects = vec![player];
     
@@ -470,18 +558,30 @@ fn main() {
 
     // main game loop 
     while !tcod.root.window_closed() {
+        // clear screen of previous frame
         tcod.con.clear();
         
         // recompute if player has moved
         let fov_recompute = previous_player_position != (objects[PLAYER].x, objects[PLAYER].y);
         render_all(&mut tcod, &mut game, &objects, fov_recompute);
-
+        
         tcod.root.flush();
         
+        // handle keys and exit game if needed
         previous_player_position = objects[PLAYER].pos();
         let player_action = handle_keys(&mut tcod, &game, &mut objects);
         if player_action == PlayerAction::Exit {
             break;
+        }
+
+        // let monsters take their turn
+        if objects[PLAYER].alive && player_action != PlayerAction::DidntTakeTurn {
+            for id in 0..objects.len() {
+                // if object has ai 
+                if objects[id].ai.is_some() {
+                    ai_take_turn(id, &tcod, &game, &mut objects);
+                }
+            }
         }
     }
 }
