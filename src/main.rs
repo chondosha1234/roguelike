@@ -19,6 +19,9 @@ const TORCH_RADIUS: i32 = 10;
 const MAX_ROOM_MONSTERS: i32 = 3;
 const MAX_ROOM_ITEMS: i32 = 2;
 const MAX_INVENTORY_SIZE: usize = 26;
+const INVENTORY_WIDTH: i32 = 50;
+const HEAL_AMOUNT: i32 = 4;
+
 const PLAYER: usize = 0; // player will always be first object in list 
 
 // size and coordinates for gui 
@@ -218,6 +221,15 @@ impl Object {
             );
         }
     }
+
+    pub fn heal(&mut self, amount: i32) {
+        if let Some(ref mut fighter) = self.fighter {
+            fighter.hp += amount;
+            if fighter.hp > fighter.max_hp {
+                fighter.hp = fighter.max_hp;
+            }
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -247,6 +259,13 @@ enum Item {
     Heal,
 }
 
+// use result for items 
+enum UseResult {
+    UsedUp,
+    Cancelled,
+}
+
+// death callback function types 
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum DeathCallback {
     Player,
@@ -527,6 +546,51 @@ fn pick_item_up(object_id: usize, game: &mut Game, objects: &mut Vec<Object>) {
     }
 }
 
+fn use_item(inventory_id: usize, tcod: &mut Tcod, game: &mut Game, objects: &mut [Object]) {
+    
+    use Item::*;
+    // call the 'use_function' if defined 
+    if let Some(item) = game.inventory[inventory_id].item {
+        let on_use = match item {
+            Heal => cast_heal,
+        };
+
+        match on_use(inventory_id, tcod, game, objects) {
+            UseResult::UsedUp => {
+                // destroy after use, unless cancelled
+                game.inventory.remove(inventory_id);
+            }
+            UseResult::Cancelled => {
+                game.messages.add("Cancelled", WHITE);
+            }
+        }
+    } else {
+        game.messages.add(
+            format!("The {} cannot be used!", game.inventory[inventory_id].name),
+            WHITE
+        );
+    }
+    
+}
+
+// function to cast heal 
+fn cast_heal(_inventory_id: usize, _tcod: &mut Tcod, game: &mut Game, objects: &mut [Object]) -> UseResult {
+    // heal the player
+    if let Some(fighter) = objects[PLAYER].fighter {
+        // already at max health, can't use ability
+        if fighter.hp == fighter.max_hp {
+            game.messages.add("You are already at full health!", RED);
+            return UseResult::Cancelled;
+        }
+        // do the heal 
+        game.messages.add("Your wounds start to heal!", LIGHT_VIOLET);
+        objects[PLAYER].heal(HEAL_AMOUNT);
+        return UseResult::UsedUp;
+    }
+    // the if let condition failed for some reason 
+    UseResult::Cancelled
+}
+
 // monster ai function to move and attack 
 fn ai_take_turn(monster_id: usize, tcod: &Tcod, game: &mut Game, objects: &mut [Object]) {
     // a basic monster takes its turn. If you can see it, it can see you
@@ -587,6 +651,99 @@ fn monster_death(monster: &mut Object, game: &mut Game) {
     monster.name = format!("remains of {}", monster.name);
 }
 
+
+/****************************************************************************************/
+
+fn menu<T: AsRef<str>>(header: &str, options: &[T], width: i32, root: &mut Root) -> Option<usize> {
+    // check number of options to inventory size
+    let error_msg = format!("Cannot have a menu with more than {} options", MAX_INVENTORY_SIZE);
+    assert!(
+        options.len() <= MAX_INVENTORY_SIZE,
+        "{}", error_msg
+    );
+
+    // calculate total height -- header plus options
+    let header_height = root.get_height_rect(0, 0, width, SCREEN_HEIGHT, header);
+    let height = options.len() as i32 + header_height;
+
+    // create offscreen console for menu window
+    let mut window = Offscreen::new(width, height);
+
+    // print header with auto wrap
+    window.set_default_foreground(WHITE);
+    window.print_rect_ex(
+        0,
+        0,
+        width,
+        height,
+        BackgroundFlag::None,
+        TextAlignment::Left,
+        header,
+    );
+
+    // print all the options 
+    for (index, option_text) in options.iter().enumerate() {
+        let menu_letter = (b'a' + index as u8) as char;  // convert index into character A-Z
+        let text = format!("({}) {}", menu_letter, option_text.as_ref());
+
+        window.print_ex(
+            0,
+            header_height + index as i32,
+            BackgroundFlag::None,
+            TextAlignment::Left,
+            text,
+        );
+    }
+
+    // blit contents of menu window onto screen
+    let x = SCREEN_WIDTH / 2 - width / 2;
+    let y = SCREEN_HEIGHT / 2 - height / 2;
+    blit(
+        &window,
+        (0, 0),
+        (width, height),
+        root,
+        (x, y),
+        1.0,    // foreground opacity
+        0.7,    // background opacity
+    );
+
+    // present root console and wait for key press to continue
+    root.flush();
+    let key = root.wait_for_keypress(true);
+
+    // convert the ASCII code to an index, and return option if valid
+    if key.printable.is_alphabetic() {
+        let index = key.printable.to_ascii_lowercase() as usize - 'a' as usize;
+        if index < options.len() {
+            Some(index)
+        } else {
+            None
+        }
+    } else {
+        None
+    }
+}
+
+// make menu of inventory items as options
+fn inventory_menu(inventory: &[Object], header: &str, root: &mut Root) -> Option<usize> {
+    // check case that inventory is empty
+    let options = if inventory.len() == 0 {
+        // add this string as an option to let user know inventory is empty
+        vec!["Inventory is empty.".into()]
+    } else {
+        inventory.iter().map(|item| item.name.clone()).collect()
+    };
+
+    let inventory_index = menu(header, &options, INVENTORY_WIDTH, root);
+
+    // if item is chosen, return it
+    if inventory.len() > 0 {
+        inventory_index
+    } else {
+        None
+    }
+}
 
 
 /****************************************************************************************/
@@ -801,6 +958,18 @@ fn handle_keys(tcod: &mut Tcod, game: &mut Game, objects: &mut Vec<Object>) -> P
                 .position(|object| object.pos() == objects[PLAYER].pos() && object.item.is_some());
             if let Some(item_id) = item_id {
                 pick_item_up(item_id, game, objects);
+            }
+            DidntTakeTurn
+        }
+        (Key { code: Text, ..}, "i", true) => {
+            // show the inventory
+            let inventory_index = inventory_menu(
+                &game.inventory,
+                "Press the key shown next to an item to use it, or any other to cancel.\n",
+                &mut tcod.root,
+            );
+            if let Some(inventory_index) = inventory_index {
+                use_item(inventory_index, tcod, game, objects);
             }
             DidntTakeTurn
         }
