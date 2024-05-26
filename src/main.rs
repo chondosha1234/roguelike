@@ -1337,20 +1337,40 @@ fn handle_keys(tcod: &mut Tcod, game: &mut Game, objects: &mut Vec<Object>) -> P
 
         (Key { code: Escape, ..}, _, _) => Exit,  // exit game, return player action exit
         // movement keys 
-        (Key { code: Up, ..}, _, true) => {
+        (Key { code: Up, ..}, _, true) | (Key { code: NumPad8, ..}, _, true) => {
             player_move_or_attack(0, -1, game, objects);
             TookTurn
         }
-        (Key { code: Down, ..}, _, true) => {
+        (Key { code: Down, ..}, _, true) | (Key { code: NumPad2, ..}, _, true) => {
             player_move_or_attack(0, 1, game, objects);
             TookTurn
         }
-        (Key { code: Left, ..}, _, true) => {
+        (Key { code: Left, ..}, _, true) | (Key { code: NumPad4, ..}, _, true) => {
             player_move_or_attack(-1, 0, game, objects);
             TookTurn
         }
-        (Key { code: Right, ..}, _, true) => {
+        (Key { code: Right, ..}, _, true) | (Key { code: NumPad6, ..}, _, true) => {
             player_move_or_attack(1, 0, game, objects);
+            TookTurn
+        }
+        (Key { code: Home, ..}, _, true) | (Key { code: NumPad7, ..}, _, true) => {
+            player_move_or_attack(-1, -1, game, objects);
+            TookTurn
+        }
+        (Key { code: PageUp, ..}, _, true) | (Key { code: NumPad9, ..}, _, true) => {
+            player_move_or_attack(1, -1, game, objects);
+            TookTurn
+        }
+        (Key { code: End, ..}, _, true) | (Key { code: NumPad1, ..}, _, true) => {
+            player_move_or_attack(-1, 1, game, objects);
+            TookTurn
+        }
+        (Key { code: PageDown, ..}, _, true) | (Key { code: NumPad3, ..}, _, true) => {
+            player_move_or_attack(1, 1, game, objects);
+            TookTurn
+        }
+        (Key { code: NumPad5, ..}, _, true) => {
+            // do nothing -- wait for monster to come to you
             TookTurn
         }
         (Key { code: Text, ..}, "g", true) => {
