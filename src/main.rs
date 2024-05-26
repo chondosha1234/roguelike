@@ -23,6 +23,10 @@ const INVENTORY_WIDTH: i32 = 50;
 const HEAL_AMOUNT: i32 = 4;
 const LIGHTNING_RANGE: i32 = 5;
 const LIGHTNING_DAMAGE: i32 = 40;
+const CONFUSE_RANGE: i32 = 8;
+const CONFUSE_NUM_TURNS: i32 = 10;
+const FIREBALL_RADIUS: i32 = 3; 
+const FIREBALL_DAMAGE: i32 = 12;
 const PLAYER: usize = 0; // player will always be first object in list 
 
 // size and coordinates for gui 
@@ -182,6 +186,11 @@ impl Object {
         ((dx.pow(2) + dy.pow(2)) as f32).sqrt()
     }
 
+    // return distance to a coordinate
+    pub fn distance(&self, x: i32, y: i32) -> f32 {
+        (((x - self.x).pow(2) + (y - self.y).pow(2)) as f32).sqrt()
+    }
+
     // set color and then draw character for object 
     pub fn draw(&self, con: &mut dyn Console) {       // Console is a trait -- dyn highlights this
         con.set_default_foreground(self.color);
@@ -259,6 +268,8 @@ struct Fighter {
 enum Item {
     Heal,
     Lightning,
+    Confuse,
+    Fireball,
 }
 
 // use result for items 
@@ -292,6 +303,10 @@ impl DeathCallback {
 #[derive(Clone, Debug, PartialEq)]
 enum Ai {
     Basic,
+    Confused {
+        previous_ai: Box<Ai>,
+        num_turns: i32,
+    },
 }
 
 /*
@@ -465,13 +480,13 @@ fn place_objects(room: Rect, map: &Map, objects: &mut Vec<Object>) {
         if !is_blocked(x, y, map, objects) {
             let dice = rand::random::<f32>();
             // create potion (70%)
-            let mut item = if dice < 0.7 {
+            let item = if dice < 0.7 {
                 // create healing potion 
                 let mut object = Object::new(x, y, '!', "healing potion", VIOLET, false);
                 object.item = Some(Item::Heal);
                 object
-            } else {
-                // create lightning bolt scroll (30%)
+            } else if dice < 0.7 + 0.1 {
+                // create lightning bolt scroll (10%)
                 let mut object = Object::new(
                     x,
                     y,
@@ -481,6 +496,30 @@ fn place_objects(room: Rect, map: &Map, objects: &mut Vec<Object>) {
                     false,
                 );
                 object.item = Some(Item::Lightning);
+                object
+            } else if dice < 0.7 + 0.1 + 0.1 {
+                // create fireball scroll (10%)
+                let mut object = Object::new(
+                    x,
+                    y,
+                    '#',
+                    "scroll of fireball",
+                    ORANGE,
+                    false,
+                );
+                object.item = Some(Item::Fireball);
+                object
+            } else {
+                // create confuse scroll (10%) 
+                let mut object = Object::new(
+                    x,
+                    y,
+                    '#',
+                    "scroll of confusion",
+                    PINK,
+                    false,
+                );
+                object.item = Some(Item::Confuse);
                 object
             };
             objects.push(item);
@@ -573,6 +612,8 @@ fn use_item(inventory_id: usize, tcod: &mut Tcod, game: &mut Game, objects: &mut
         let on_use = match item {
             Heal => cast_heal,
             Lightning => cast_lightning,
+            Confuse => cast_confuse,
+            Fireball => cast_fireball,
         };
 
         match on_use(inventory_id, tcod, game, objects) {
@@ -630,6 +671,63 @@ fn cast_lightning(_inventory_id: usize, tcod: &mut Tcod, game: &mut Game, object
     }
 }
 
+// function to use confuse ability
+fn cast_confuse(_inventory_id: usize, tcod: &mut Tcod, game: &mut Game, objects: &mut[Object]) -> UseResult {
+    
+    game.messages.add("Left click an enemy to confuse it, or right click to cancel.", LIGHT_CYAN);
+
+    // find closest enemy in range and confuse it
+    let monster_id = target_monster(tcod, game, objects, Some(CONFUSE_RANGE as f32));
+    if let Some(monster_id) = monster_id {
+        // get old ai, make it Basic by default
+        let old_ai = objects[monster_id].ai.take().unwrap_or(Ai::Basic);
+        // replace ai with confused 
+        objects[monster_id].ai = Some(Ai::Confused {
+            previous_ai: Box::new(old_ai),
+            num_turns: CONFUSE_NUM_TURNS,
+        });
+        
+        game.messages.add(
+            format!("The eyes of {} look vacant, as they start to stumble around", objects[monster_id].name),
+            LIGHT_GREEN,
+        );
+
+        UseResult::UsedUp
+    } else {
+        // no enemy in the max range
+        game.messages.add("No enemy is close enough to confuse.", RED);
+        UseResult::Cancelled
+    }
+}
+
+// function to cast targeted fireball 
+fn cast_fireball(_inventory_id: usize, tcod: &mut Tcod, game: &mut Game, objects: &mut [Object]) -> UseResult {
+    // ask player for target tile
+    game.messages.add("Left click tile to target fireball, or Right click to cancel.", LIGHT_CYAN);
+
+    let (x, y) = match target_tile(tcod, game, objects, None) {
+        Some(tile_pos) => tile_pos,  // target_tile returned tuple, set it to (x, y)
+        None => return UseResult::Cancelled,  // target_tile returned none, user cancelled
+    };
+
+    game.messages.add(
+        format!("The fireball explodes, burning everything within {} tiles!", FIREBALL_RADIUS),
+        ORANGE,
+    );
+    
+    // go through all objects and see if they are in blast radius 
+    for obj in objects {
+        if obj.distance(x, y) <= FIREBALL_RADIUS as f32 && obj.fighter.is_some() {
+            game.messages.add(
+                format!("The {} gets burned for {} hit points!", obj.name, FIREBALL_DAMAGE),
+                ORANGE,
+            );
+            obj.take_damage(FIREBALL_DAMAGE, game);
+        }
+    }
+    UseResult::UsedUp
+}
+
 // funtion to find the closest monster object to the player -- returns index of the monster
 fn closest_monster(tcod: &Tcod, objects: &[Object], max_range: i32) -> Option<usize> {
     let mut closest_enemy = None;
@@ -654,8 +752,25 @@ fn closest_monster(tcod: &Tcod, objects: &[Object], max_range: i32) -> Option<us
     closest_enemy
 }
 
-// monster ai function to move and attack 
+
 fn ai_take_turn(monster_id: usize, tcod: &Tcod, game: &mut Game, objects: &mut [Object]) {
+    use Ai::*;
+    
+    // take() removes the value and puts None, but it will be replaced by return from functions 
+    if let Some(ai) = objects[monster_id].ai.take() {
+        let new_ai = match ai {
+            Basic => ai_basic(monster_id, tcod, game, objects), // returns Basic for new_ai
+            Confused {
+                previous_ai,
+                num_turns,
+            } => ai_confused(monster_id, tcod, game, objects, previous_ai, num_turns),
+        };
+        objects[monster_id].ai = Some(new_ai);
+    }
+}
+
+// monster ai function to move and attack 
+fn ai_basic(monster_id: usize, tcod: &Tcod, game: &mut Game, objects: &mut [Object]) -> Ai {
     // a basic monster takes its turn. If you can see it, it can see you
     let (monster_x, monster_y) = objects[monster_id].pos();
 
@@ -671,7 +786,43 @@ fn ai_take_turn(monster_id: usize, tcod: &Tcod, game: &mut Game, objects: &mut [
             monster.attack(player, game); 
         }
     }
+    Ai::Basic
 }
+
+fn ai_confused(
+    monster_id: usize, 
+    _tcod: &Tcod, 
+    game: &mut Game, 
+    objects: &mut [Object],
+    previous_ai: Box<Ai>,
+    num_turns: i32,
+) -> Ai {
+    
+    if num_turns >= 0 {
+        // still confused - move random direction and decrement turns
+        move_by(
+            monster_id,
+            rand::thread_rng().gen_range(-1, 2), // -1, 0 or 1 in x direction
+            rand::thread_rng().gen_range(-1, 2), // -1, 0 or 1 in y direction
+            &game.map,
+            objects,
+        );
+        // return modified confused ai 
+        Ai::Confused {
+            previous_ai: previous_ai,
+            num_turns: num_turns - 1,
+        }
+    } else {
+        // end of effect, restore previous AI (this one will be deleted)
+        game.messages.add(
+            format!("The {} is no longer confused!", objects[monster_id].name),
+            RED,
+        );
+        *previous_ai  // return value from Box<Ai>
+    }
+
+}
+
 
 // function to split vector into 2 parts so you can borrow from 2 elements at the same time
 fn mut_two<T>(first_index: usize, second_index: usize, items: &mut [T]) -> (&mut T, &mut T) {
@@ -1037,6 +1188,69 @@ fn handle_keys(tcod: &mut Tcod, game: &mut Game, objects: &mut Vec<Object>) -> P
             DidntTakeTurn
         }
         _ => DidntTakeTurn,
+    }
+}
+
+// return position of tile left clicked in players FOV
+// returns (None, None) if right clicked
+fn target_tile(
+    tcod: &mut Tcod,
+    game: &mut Game,
+    objects: &[Object],
+    max_range: Option<f32>,
+) -> Option<(i32, i32)> {
+    
+    use tcod::input::KeyCode::Escape;
+
+    loop {
+        // render the screen - erases inventory and shows names under mouse
+        tcod.root.flush();
+
+        let event = input::check_for_event(input::KEY_PRESS | input::MOUSE).map(|e| e.1);
+        match event {
+            Some(Event::Mouse(m)) => tcod.mouse = m,
+            Some(Event::Key(k)) => tcod.key = k,
+            None => tcod.key = Default::default(),
+        }
+        render_all(tcod, game, objects, false);
+        
+        let (x, y) = (tcod.mouse.cx as i32, tcod.mouse.cy as i32);
+
+        // accept the target if in player fov and in designated range
+        let in_fov = (x < MAP_WIDTH) && (y < MAP_HEIGHT) && tcod.fov.is_in_fov(x, y);
+        let in_range = max_range.map_or(true, |range| objects[PLAYER].distance(x, y) <= range);
+        // left mouse pressed, in fov, and in range
+        if tcod.mouse.lbutton_pressed && in_fov && in_range {
+            return Some((x, y));
+        }
+        
+        // cancel if player clicks right button or escape
+        if tcod.mouse.rbutton_pressed || tcod.key.code == Escape {
+            return None; 
+        }
+    }    
+}
+
+// function to target specifically a monster instead of any tile
+fn target_monster(
+    tcod: &mut Tcod,
+    game: &mut Game,
+    objects: &[Object],
+    max_range: Option<f32>,
+) -> Option<usize> {   // return index of monster
+    
+    loop {
+        match target_tile(tcod, game, objects, max_range) {
+            Some((x, y)) => {
+                // return the first clicked monster, keep looping until this
+                for (id, obj) in objects.iter().enumerate() {
+                    if obj.pos() == (x, y) && obj.fighter.is_some() && id != PLAYER {
+                        return Some(id);
+                    }
+                }
+            }
+            None => return None,
+        }
     }
 }
 
