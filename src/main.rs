@@ -1,10 +1,14 @@
 
 use std::cmp;
+use std::error::Error;
+use std::fs::File;
+use std::io::{Read, Write};
 use rand::Rng;
 use tcod::colors::*;
 use tcod::console::*;
 use tcod::map::{FovAlgorithm, Map as FovMap};  // rename tcod Map type as FovMap
 use tcod::input::{self, Event, Key, Mouse};
+use serde::{Deserialize, Serialize};
 
 const SCREEN_WIDTH: i32 = 80;
 const SCREEN_HEIGHT: i32 = 50;
@@ -64,6 +68,7 @@ struct Tcod {
 
 type Map = Vec<Vec<Tile>>;  // 2d array of tiles 
 
+#[derive(Serialize, Deserialize)]
 struct Game {
     map: Map,
     messages: Messages,
@@ -72,7 +77,7 @@ struct Game {
 
 
 // struct of map tile and properties
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 struct Tile {
     blocked: bool,
     explored: bool,
@@ -140,7 +145,7 @@ impl Rect {
  */
 
 // generic object: player, monster, item, stairs
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 struct Object {
     x: i32,
     y: i32,
@@ -254,7 +259,7 @@ enum PlayerAction {
  */
 
 // combat related properties and methods (player, npc, enemy)
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 struct Fighter {
     max_hp: i32,
     hp: i32,
@@ -264,7 +269,7 @@ struct Fighter {
 }
 
 // item related properties and methods 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 enum Item {
     Heal,
     Lightning,
@@ -279,7 +284,7 @@ enum UseResult {
 }
 
 // death callback function types 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 enum DeathCallback {
     Player,
     Monster,
@@ -300,7 +305,7 @@ impl DeathCallback {
 }
 
 // monster artificial intelligence
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 enum Ai {
     Basic,
     Confused {
@@ -314,6 +319,7 @@ enum Ai {
  */
 
 // struct to hold list of messages -- each message has String for message and color 
+#[derive(Serialize, Deserialize)]
 struct Messages {
     messages: Vec<(String, Color)>,
 }
@@ -1010,6 +1016,19 @@ fn main_menu(tcod: &mut Tcod) {
                 let (mut game, mut objects) = new_game(tcod);
                 play_game(tcod, &mut game, &mut objects);
             }
+            Some(1) => {
+                // load game
+                match load_game() {
+                    Ok((mut game, mut objects)) => {
+                        initialize_fov(tcod, &game.map);
+                        play_game(tcod, &mut game, &mut objects);
+                    }
+                    Err(_e) => {
+                        msgbox("\nNo saved game to load.\n", 24, &mut tcod.root);
+                        continue;
+                    }
+                }
+            }
             Some(2) => {
                 // quit game 
                 break;
@@ -1017,6 +1036,12 @@ fn main_menu(tcod: &mut Tcod) {
             _ => {}
         }
     }
+}
+
+// use menu function to display list of error messages 
+fn msgbox(text: &str, width: i32, root: &mut Root) {
+    let options: &[&str] = &[];
+    menu(text, options, width, root);
 }
 
 
@@ -1378,6 +1403,28 @@ fn new_game(tcod: &mut Tcod) -> (Game, Vec<Object>) {
  
 }
 
+// function to save game state
+// return Ok or error - if game save fails 
+fn save_game(game: &Game, objects: &[Object]) -> Result<(), Box<dyn Error>> {
+    // convert game and object list to json
+    let save_data = serde_json::to_string(&(game, objects))?;
+    // create file names savegame
+    let mut file = File::create("savegame")?;
+    // write the json data to file
+    file.write_all(save_data.as_bytes())?;
+    // return Ok if successful
+    Ok(())
+}
+
+// function to load saved game
+fn load_game() -> Result<(Game, Vec<Object>), Box<dyn Error>> {
+    let mut json_save_state = String::new();
+    let mut file = File::open("savegame")?;
+    file.read_to_string(&mut json_save_state)?;
+    let result = serde_json::from_str::<(Game, Vec<Object>)>(&json_save_state)?;
+    Ok(result)
+}
+
 // function to handle initializing an FOV for new or loaded game
 fn initialize_fov(tcod: &mut Tcod, map: &Map) {
     // populate FOV map according to generated map 
@@ -1424,6 +1471,7 @@ fn play_game(tcod: &mut Tcod, game: &mut Game, objects: &mut Vec<Object>) {
         previous_player_position = objects[PLAYER].pos();
         let player_action = handle_keys(tcod, game, objects);
         if player_action == PlayerAction::Exit {
+            save_game(game, objects).unwrap();
             break;
         }
 
