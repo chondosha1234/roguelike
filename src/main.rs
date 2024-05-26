@@ -604,6 +604,16 @@ fn pick_item_up(object_id: usize, game: &mut Game, objects: &mut Vec<Object>) {
     }
 }
 
+// function to drop item from inventory to x/y of player
+fn drop_item(inventory_id: usize, game: &mut Game, objects: &mut Vec<Object>) {
+    let mut item = game.inventory.remove(inventory_id);
+    item.set_pos(objects[PLAYER].x, objects[PLAYER].y);
+
+    game.messages.add(format!("You dropped a {}.", item.name), YELLOW);
+    // item needs to be in list again to draw it
+    objects.push(item);
+}
+
 fn use_item(inventory_id: usize, tcod: &mut Tcod, game: &mut Game, objects: &mut [Object]) {
     
     use Item::*;
@@ -1172,6 +1182,19 @@ fn handle_keys(tcod: &mut Tcod, game: &mut Game, objects: &mut Vec<Object>) -> P
                 .position(|object| object.pos() == objects[PLAYER].pos() && object.item.is_some());
             if let Some(item_id) = item_id {
                 pick_item_up(item_id, game, objects);
+            }
+            DidntTakeTurn
+        }
+        (Key { code: Text, ..}, "d", true) => {
+            // show inventory, if item selected, drop it
+            let inventory_index = inventory_menu(
+                &game.inventory,
+                "Press the key next to an item you want to drop, or any other to cancel.\n",
+                &mut tcod.root,
+            );
+
+            if let Some(inventory_index) = inventory_index {
+                drop_item(inventory_index, game, objects);
             }
             DidntTakeTurn
         }
