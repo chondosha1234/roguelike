@@ -160,6 +160,7 @@ struct Object {
     fighter: Option<Fighter>,  // can be some or none 
     ai: Option<Ai>,                         
     item: Option<Item>,
+    equipment: Option<Equipment>,
     always_visible: bool,
     level: i32,
 }
@@ -177,6 +178,7 @@ impl Object {
             fighter: None,
             ai: None,
             item: None,
+            equipment: None,
             always_visible: false,
             level: 1,
         }
@@ -258,6 +260,38 @@ impl Object {
             }
         }
     }
+
+    pub fn equip(&mut self, messages: &mut Messages) {
+        if self.item.is_none() {
+            messages.add(format!("Can't equip {:?} because it is not an item.", self), RED);
+            return;
+        }
+
+        if let Some(ref mut equipment) = self.equipment {
+            if !equipment.equipped {
+                equipment.equipped = true;
+                messages.add(format!("Equipped {} on {}.", self.name, equipment.slot), LIGHT_GREEN);
+            }
+        } else {
+            messages.add(format!("Can't equip {:?} because its not equipment.", self), RED);
+        }
+    }
+
+    pub fn unequip(&mut self, messages: &mut Messages) {
+        if self.item.is_none() {
+            messages.add(format!("Can't unequip {:?} because it is not an item.", self), RED);
+            return;
+        }
+
+        if let Some(ref mut equipment) = self.equipment {
+            if equipment.equipped {
+                equipment.equipped = false;
+                messages.add(format!("Unequipped {} on {}.", self.name, equipment.slot), LIGHT_YELLOW);
+            }
+        } else {
+            messages.add(format!("Can't unequip {:?} because its not equipment.", self), RED);
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -295,12 +329,39 @@ enum Item {
     Lightning,
     Confuse,
     Fireball,
+    Equipment,
 }
 
 // use result for items 
 enum UseResult {
     UsedUp,
+    UsedAndKept,
     Cancelled,
+}
+
+// struct for equipment component of object
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+struct Equipment {
+    slot: Slot,
+    equipped: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+enum Slot {
+    LeftHand,
+    RightHand,
+    Head,
+}
+
+// implementing Display trait for Slot enum
+impl std::fmt::Display for Slot {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match *self {
+            Slot::LeftHand => write!(f, "left hand"),
+            Slot::RightHand => write!(f, "right hand"),
+            Slot::Head => write!(f, "head"),
+        }
+    }
 }
 
 // death callback function types 
@@ -556,6 +617,10 @@ fn place_objects(room: Rect, map: &Map, objects: &mut Vec<Object>, level: u32) {
     // item random table
     let item_chances = &mut [
         Weighted {
+            weight: 1000,  // change later
+            item: Item::Equipment,
+        },
+        Weighted {
             weight: 35,
             item: Item::Heal,
         },
@@ -593,6 +658,13 @@ fn place_objects(room: Rect, map: &Map, objects: &mut Vec<Object>, level: u32) {
             let dice = rand::random::<f32>();
             // create potion (70%)
             let mut item = match item_choice.ind_sample(&mut rand::thread_rng()) {
+                Item::Equipment => {
+                    // create a sword
+                    let mut object = Object::new(x, y, '/', "sword", SKY, false);
+                    object.item = Some(Item::Equipment);
+                    object.equipment = Some(Equipment { equipped: false, slot: Slot::RightHand });
+                    object
+                }
                 Item::Heal => {
                     // create healing potion 
                     let mut object = Object::new(x, y, '!', "healing potion", VIOLET, false);
@@ -720,13 +792,27 @@ fn pick_item_up(object_id: usize, game: &mut Game, objects: &mut Vec<Object>) {
             format!("You picked up {}!", item.name),
             GREEN,
         );
+        let index = game.inventory.len();
+        let slot = item.equipment.map(|e| e.slot);
         game.inventory.push(item);
+        
+        // if slot is empty for equipment type, then auto equip
+        if let Some(slot) = slot {
+            if get_equipped_in_slot(slot, &game.inventory).is_none() {
+                game.inventory[index].equip(&mut game.messages);
+            }
+        }
     }
 }
 
 // function to drop item from inventory to x/y of player
 fn drop_item(inventory_id: usize, game: &mut Game, objects: &mut Vec<Object>) {
     let mut item = game.inventory.remove(inventory_id);
+    // unequip item if it is equipped
+    if item.equipment.is_some() {
+        item.unequip(&mut game.messages);
+    }
+
     item.set_pos(objects[PLAYER].x, objects[PLAYER].y);
 
     game.messages.add(format!("You dropped a {}.", item.name), YELLOW);
@@ -744,6 +830,7 @@ fn use_item(inventory_id: usize, tcod: &mut Tcod, game: &mut Game, objects: &mut
             Lightning => cast_lightning,
             Confuse => cast_confuse,
             Fireball => cast_fireball,
+            Equipment => toggle_equipment,
         };
 
         match on_use(inventory_id, tcod, game, objects) {
@@ -751,6 +838,7 @@ fn use_item(inventory_id: usize, tcod: &mut Tcod, game: &mut Game, objects: &mut
                 // destroy after use, unless cancelled
                 game.inventory.remove(inventory_id);
             }
+            UseResult::UsedAndKept => {} // do nothing
             UseResult::Cancelled => {
                 game.messages.add("Cancelled", WHITE);
             }
@@ -762,6 +850,41 @@ fn use_item(inventory_id: usize, tcod: &mut Tcod, game: &mut Game, objects: &mut
         );
     }
     
+}
+
+// function to equip / unequip items
+fn toggle_equipment(inventory_id: usize, _tcod: &mut Tcod, game: &mut Game, _objects: &mut [Object]) -> UseResult {
+    
+    let equipment = match game.inventory[inventory_id].equipment {
+        Some(equipment) => equipment,
+        None => return UseResult::Cancelled,
+    };
+    
+    if let Some(current) = get_equipped_in_slot(equipment.slot, &game.inventory) {
+        game.inventory[current].unequip(&mut game.messages);
+    }
+
+    if equipment.equipped {
+        game.inventory[inventory_id].unequip(&mut game.messages);
+    } else {
+        game.inventory[inventory_id].equip(&mut game.messages);
+    }
+    UseResult::UsedAndKept
+}
+
+// get current equipment in a slot -- return index in object list
+fn get_equipped_in_slot(slot: Slot, inventory: &[Object]) -> Option<usize> {
+    
+    for (inventory_id, item) in inventory.iter().enumerate() {
+        if item
+            .equipment
+            .as_ref()
+            .map_or(false, |e| e.equipped && e.slot == slot) 
+            {
+                return Some(inventory_id);     
+            }
+    }
+    None
 }
 
 // function to cast heal 
@@ -1035,9 +1158,9 @@ fn level_up(tcod: &mut Tcod, game: &mut Game, objects: &mut [Object]) {
             choice = menu(
                 "Level up! Choose skill to increase:\n",
                 &[
-                    format!("Constitution (+20 HP, from {}", fighter.max_hp),
-                    format!("Strength (+1 attack, from {}", fighter.power),
-                    format!("Agility (+1  defense, from {}", fighter.defense),
+                    format!("Constitution (+20 HP, from {})", fighter.max_hp),
+                    format!("Strength (+1 attack, from {})", fighter.power),
+                    format!("Agility (+1  defense, from {})", fighter.defense),
                 ],
                 LEVEL_SCREEN_WIDTH,
                 &mut tcod.root,
@@ -1158,7 +1281,18 @@ fn inventory_menu(inventory: &[Object], header: &str, root: &mut Root) -> Option
         // add this string as an option to let user know inventory is empty
         vec!["Inventory is empty.".into()]
     } else {
-        inventory.iter().map(|item| item.name.clone()).collect()
+        inventory
+            .iter()
+            .map(|item| {
+                // show additional info if item equipped
+                match item.equipment {
+                    Some(equipment) if equipment.equipped => {
+                        format!("{} (on {})", item.name, equipment.slot)
+                    }
+                    _ => item.name.clone(),
+                }
+            })
+            .collect()
     };
 
     let inventory_index = menu(header, &options, INVENTORY_WIDTH, root);
@@ -1519,13 +1653,13 @@ fn handle_keys(tcod: &mut Tcod, game: &mut Game, objects: &mut Vec<Object>) -> P
                 let msg = format!(
                         "Character Information
 
-                Level: {}
-                Experience: {}
-                Next Level: {}
+            Level: {}
+            Experience: {}
+            Next Level: {}
 
-                Maximum HP: {}
-                Attack: {}
-                Defense: {}",
+            Maximum HP: {}
+            Attack: {}
+            Defense: {}",
                     level, fighter.xp, level_up_xp, fighter.max_hp, fighter.power, fighter.defense
                 );
 
