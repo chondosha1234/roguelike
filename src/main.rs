@@ -1,14 +1,30 @@
+mod message;
+mod map;
+mod item;
+mod monster_ai;
+mod object;
+mod graphics;
+mod menu;
+mod magic;
+mod game;
 
-use std::cmp;
 use std::error::Error;
 use std::fs::File;
 use std::io::{Read, Write};
-use rand::Rng;
 use tcod::colors::*;
 use tcod::console::*;
 use tcod::map::{FovAlgorithm, Map as FovMap};  // rename tcod Map type as FovMap
 use tcod::input::{self, Event, Key, Mouse};
 use serde::{Deserialize, Serialize};
+
+use crate::message::Messages;
+use crate::map::{Map, make_map};
+use crate::object::{Object, PlayerAction, Fighter, DeathCallback, level_up};
+use crate::item::*;
+use crate::monster_ai::{Ai, ai_take_turn};
+use crate::menu::{main_menu};
+use crate::graphics::{render_all, handle_keys};
+use crate::game::{Tcod, Game};
 
 const SCREEN_WIDTH: i32 = 80;
 const SCREEN_HEIGHT: i32 = 50;
@@ -53,8 +69,9 @@ const COLOR_LIGHT_GROUND: Color = Color { r: 200, g: 180, b: 50 };
 const LIMIT_FPS: i32 = 20; // 20 fps maximum
 
 
+/*
 // struct to hold all tcod related things for convenience in passing 
-struct Tcod {
+pub struct Tcod {
     root: Root,
     con: Offscreen,
     panel: Offscreen,
@@ -68,17 +85,17 @@ struct Tcod {
  *  Map, Tile, Rect struct and implementations 
  */
 
-type Map = Vec<Vec<Tile>>;  // 2d array of tiles 
+//type Map = Vec<Vec<Tile>>;  // 2d array of tiles 
 
 #[derive(Serialize, Deserialize)]
-struct Game {
+pub struct Game {
     map: Map,
     messages: Messages,
     inventory: Vec<Object>,
     dungeon_level: u32,
 }
-
-
+*/
+/*
 // struct of map tile and properties
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 struct Tile {
@@ -141,6 +158,7 @@ impl Rect {
             && (self.y2 >= other.y1)
     }
 }
+
 
 
 /*
@@ -450,36 +468,9 @@ enum Ai {
     },
 }
 
-/*
- *  Message struct and implementation 
- */
-
-// struct to hold list of messages -- each message has String for message and color 
-#[derive(Serialize, Deserialize)]
-struct Messages {
-    messages: Vec<(String, Color)>,
-}
-
-impl Messages {
-
-    pub fn new() -> Self {
-        Self { messages: vec![] }
-    }
-
-    // add new message as tuple 
-    pub fn add<T: Into<String>>(&mut self, message: T, color: Color) {
-        self.messages.push((message.into(), color));
-    }
-
-    //Create a "Double Ended Iterator" over the messages
-    pub fn iter(&self) -> impl DoubleEndedIterator<Item = &(String, Color)> {
-        self.messages.iter()
-    }
-}
-
 
 /***********************************************************************************/
-
+/*
 
 // function to create map with vec! macro 
 fn make_map(objects: &mut Vec<Object>, level: u32) -> Map {
@@ -799,7 +790,7 @@ fn place_objects(room: Rect, map: &Map, objects: &mut Vec<Object>, level: u32) {
         }
     }
 }
-
+*/
 
 /*************************************************************************************/
 
@@ -970,6 +961,7 @@ fn get_equipped_in_slot(slot: Slot, inventory: &[Object]) -> Option<usize> {
     None
 }
 
+
 // function to cast heal 
 fn cast_heal(_inventory_id: usize, _tcod: &mut Tcod, game: &mut Game, objects: &mut [Object]) -> UseResult {
     let player = &mut objects[PLAYER];
@@ -1077,6 +1069,7 @@ fn cast_fireball(_inventory_id: usize, tcod: &mut Tcod, game: &mut Game, objects
     UseResult::UsedUp
 }
 
+/*
 // funtion to find the closest monster object to the player -- returns index of the monster
 fn closest_monster(tcod: &Tcod, objects: &[Object], max_range: i32) -> Option<usize> {
     let mut closest_enemy = None;
@@ -1454,9 +1447,10 @@ fn msgbox(text: &str, width: i32, root: &mut Root) {
     menu(text, options, width, root);
 }
 
-
+*/
+*/
 /****************************************************************************************/
-
+/*
 
 // function to draw all objects and map 
 fn render_all(tcod: &mut Tcod, game: &mut Game, objects: &[Object], fov_recompute: bool) {
@@ -1843,11 +1837,11 @@ fn get_names_under_mouse(mouse: Mouse, objects: &[Object], fov_map: &FovMap) -> 
 
     names.join(", ")  // join the names separated by commas, and return 
 }
-
+*/
 
 /******************************************************************************************/
-
-fn new_game(tcod: &mut Tcod) -> (Game, Vec<Object>) {
+/*
+pub fn new_game(tcod: &mut Tcod) -> (Game, Vec<Object>) {
     // create player object and object list 
     let mut player = Object::new(0, 0, '@', "player", WHITE, true);
     player.alive = true;
@@ -1856,6 +1850,7 @@ fn new_game(tcod: &mut Tcod) -> (Game, Vec<Object>) {
         hp: 100,
         base_defense: 1,
         base_power: 2,
+        base_magic: 0,
         xp: 0,
         on_death: DeathCallback::Player,
     });
@@ -1879,6 +1874,7 @@ fn new_game(tcod: &mut Tcod) -> (Game, Vec<Object>) {
         max_hp_bonus: 0,
         power_bonus: 2,
         defense_bonus: 0,
+        magic_bonus: 0,
     });
     game.inventory.push(dagger);
     
@@ -1896,7 +1892,7 @@ fn new_game(tcod: &mut Tcod) -> (Game, Vec<Object>) {
 
 // function to save game state
 // return Ok or error - if game save fails 
-fn save_game(game: &Game, objects: &[Object]) -> Result<(), Box<dyn Error>> {
+pub fn save_game(game: &Game, objects: &[Object]) -> Result<(), Box<dyn Error>> {
     // convert game and object list to json
     let save_data = serde_json::to_string(&(game, objects))?;
     // create file names savegame
@@ -1908,7 +1904,7 @@ fn save_game(game: &Game, objects: &[Object]) -> Result<(), Box<dyn Error>> {
 }
 
 // function to load saved game
-fn load_game() -> Result<(Game, Vec<Object>), Box<dyn Error>> {
+pub fn load_game() -> Result<(Game, Vec<Object>), Box<dyn Error>> {
     let mut json_save_state = String::new();
     let mut file = File::open("savegame")?;
     file.read_to_string(&mut json_save_state)?;
@@ -1917,7 +1913,7 @@ fn load_game() -> Result<(Game, Vec<Object>), Box<dyn Error>> {
 }
 
 // function to handle initializing an FOV for new or loaded game
-fn initialize_fov(tcod: &mut Tcod, map: &Map) {
+pub fn initialize_fov(tcod: &mut Tcod, map: &Map) {
     // populate FOV map according to generated map 
     for y in 0..MAP_HEIGHT{
         for x in 0..MAP_WIDTH {
@@ -1935,7 +1931,7 @@ fn initialize_fov(tcod: &mut Tcod, map: &Map) {
 }
 
 // function to handle main game loop 
-fn play_game(tcod: &mut Tcod, game: &mut Game, objects: &mut Vec<Object>) {
+pub fn play_game(tcod: &mut Tcod, game: &mut Game, objects: &mut Vec<Object>) {
    
     // force FOV "recompute" first time through game loop because invalid position
     let mut previous_player_position = (-1, -1);
@@ -1982,7 +1978,7 @@ fn play_game(tcod: &mut Tcod, game: &mut Game, objects: &mut Vec<Object>) {
 }
 
 // move to next level 
-fn next_level(tcod: &mut Tcod, game: &mut Game, objects: &mut Vec<Object>) {
+pub fn next_level(tcod: &mut Tcod, game: &mut Game, objects: &mut Vec<Object>) {
     
     game.messages.add("You take a moment to rest and recover your strength.", VIOLET);
     // player rests and heals 50% 
@@ -2001,7 +1997,7 @@ fn next_level(tcod: &mut Tcod, game: &mut Game, objects: &mut Vec<Object>) {
     game.map = make_map(objects, game.dungeon_level);
     initialize_fov(tcod, &game.map);
 }
-
+*/
 
 fn main() {
 
