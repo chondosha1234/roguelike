@@ -8,8 +8,8 @@ use crate::item::{Item, Slot, Equipment};
 use crate::object::{Object, Fighter, Transition, DeathCallback, from_dungeon_level, is_blocked};
 use crate::monster_ai::Ai;
 
-const MAP_WIDTH: i32 = 80;
-const MAP_HEIGHT: i32 = 43;
+const MAP_WIDTH: i32 = 100;
+const MAP_HEIGHT: i32 = 53;
 const ROOM_MAX_SIZE: i32 = 10;
 const ROOM_MIN_SIZE: i32 = 6;
 const MAX_ROOMS: i32 = 30;

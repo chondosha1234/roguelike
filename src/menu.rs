@@ -5,8 +5,8 @@ use tcod::console::*;
 use crate::game::{Tcod, Game, new_game, play_game, save_game, load_game, initialize_fov};
 use crate::object::Object;
 
-const SCREEN_WIDTH: i32 = 80;
-const SCREEN_HEIGHT: i32 = 50;
+const SCREEN_WIDTH: i32 = 100;
+const SCREEN_HEIGHT: i32 = 60;
 const INVENTORY_WIDTH: i32 = 50;
 const MAX_INVENTORY_SIZE: usize = 26;
 // size and coordinates for gui 
@@ -126,7 +126,7 @@ pub fn inventory_menu(inventory: &[Object], header: &str, root: &mut Root) -> Op
 
 // main menu function
 pub fn main_menu(tcod: &mut Tcod) {
-    let img = tcod::image::Image::from_file("../menu_background.png")
+    let img = tcod::image::Image::from_file("../menu_background2.png")
         .ok()
         .expect("Background image not found!");
 
@@ -137,7 +137,7 @@ pub fn main_menu(tcod: &mut Tcod) {
         tcod.root.set_default_foreground(LIGHT_YELLOW);
         tcod.root.print_ex(
             SCREEN_WIDTH / 2,
-            SCREEN_HEIGHT / 2 - 4,
+            SCREEN_HEIGHT / 2 + 10,
             BackgroundFlag::None,
             TextAlignment::Center,
             "Tombs of the Ancient Kings",
@@ -145,7 +145,7 @@ pub fn main_menu(tcod: &mut Tcod) {
         
         tcod.root.print_ex(
             SCREEN_WIDTH / 2,
-            SCREEN_HEIGHT / 2 - 2,
+            SCREEN_HEIGHT / 2 + 12,
             BackgroundFlag::None,
             TextAlignment::Center,
             "Jonathan Miller -- Tutorial by tomassedovic",

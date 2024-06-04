@@ -13,10 +13,10 @@ const PLAYER: usize = 0;
 const LEVEL_UP_BASE: i32 = 200; // need 200 xp for first level up
 const LEVEL_UP_FACTOR: i32 = 150; // increase needed xp per each lvl up
 
-const SCREEN_WIDTH: i32 = 80;
-const SCREEN_HEIGHT: i32 = 50;
-const MAP_WIDTH: i32 = 80;
-const MAP_HEIGHT: i32 = 43;
+const SCREEN_WIDTH: i32 = 100;
+const SCREEN_HEIGHT: i32 = 60;
+const MAP_WIDTH: i32 = 100;
+const MAP_HEIGHT: i32 = 53;
 const LEVEL_SCREEN_WIDTH: i32 = 40;
 const CHARACTER_SCREEN_WIDTH: i32 = 30;
 const BAR_WIDTH: i32 = 20;

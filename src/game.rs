@@ -16,8 +16,8 @@ use crate::monster_ai::{Ai, ai_take_turn};
 use crate::menu::{main_menu};
 use crate::graphics::{render_all, handle_keys};
 
-const MAP_WIDTH: i32 = 80;
-const MAP_HEIGHT: i32 = 43;
+const MAP_WIDTH: i32 = 100;
+const MAP_HEIGHT: i32 = 53;
 const PLAYER: usize = 0;
 
 
