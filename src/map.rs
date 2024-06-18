@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use crate::item::{Item, Slot, Equipment};
 use crate::object::{Object, Fighter, Transition, DeathCallback, from_dungeon_level, is_blocked};
 use crate::monster_ai::Ai;
+use crate::monster::{ monster_table };
 
 const MAP_WIDTH: i32 = 100;
 const MAP_HEIGHT: i32 = 53;
@@ -50,10 +51,10 @@ impl Tile {
 // rectangle on map representing a room, has coordinates of top left and bottom right
 #[derive(Clone, Copy, Debug)]
 pub struct Rect {
-    x1: i32,
-    y1: i32,
-    x2: i32,
-    y2: i32,
+    pub x1: i32,
+    pub y1: i32,
+    pub x2: i32,
+    pub y2: i32,
 }
 
 impl Rect {
@@ -184,20 +185,32 @@ fn create_v_tunnel(y1: i32, y2: i32, x: i32, map: &mut Map) {
 // function to place objects in a room
 pub fn place_objects(room: Rect, map: &Map, objects: &mut Vec<Object>, level: u32) {
     
-    use rand::distributions::{IndependentSample, Weighted, WeightedChoice};
     
+    use rand::distributions::{IndependentSample, Weighted, WeightedChoice};
+    /*
     let max_monsters = from_dungeon_level(
         &[
             Transition { level: 1, value: 2 },
             Transition { level: 4, value: 3 },
             Transition { level: 6, value: 5 },
+            Transition { level: 11, value: 2 },
+            Transition { level: 15, value: 3 },
+            Transition { level: 18, value: 5 },
+            Transition { level: 21, value: 3 },
+            Transition { level: 24, value: 4 },
+            Transition { level: 27, value: 6 },
         ],
         level,
     );
 
     // get random number of monsters
     let num_monsters = rand::thread_rng().gen_range(0, max_monsters + 1);
+    */
+
+
+    monster_table(room, map, objects, level);
     
+    /*
     // troll chance random table
     let troll_chance = from_dungeon_level(
         &[
@@ -266,6 +279,7 @@ pub fn place_objects(room: Rect, map: &Map, objects: &mut Vec<Object>, level: u3
             objects.push(monster);
         }
     }
+    */
 
     // max number of items per room
     let max_items = from_dungeon_level(
